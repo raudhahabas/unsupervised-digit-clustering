@@ -6,16 +6,19 @@ output:
   pdf_document:
     latex_engine: xelatex
     number_sections: true
+  html_document:
+    number_sections: true
+    toc: true
+    toc_float: true
+    theme: flatly
 ---
 
 
 # Introduction {.unnumbered}
 This report analyses a dataset of 3,000 handwritten digits (5, 6, and 7) to explore unsupervised learning techniques. The high-dimensional pixel data ($28 \times 28 = 784$ dimensions) is processed to extract meaningful patterns without using true labels. The analysis proceeds in three tasks:
-\newline
+
 - **PCA**: Reducing dimensionality to capture the most important variations in the images.
-\newline
 - **Clustering**: Comparing K-means and Hierarchical clustering methods to identify digit groups.
-\newline
 - **Reconstruction**: Visually validating the PCA features by reversing the transformation.
 
 # Principal Component Analysis (PCA)
@@ -29,7 +32,7 @@ which explain most of the important variation in the digit images.
 Each handwritten digit (5, 6, or 7) is represented by a vector of 784 grayscale pixel values. We load the dataset, separate the image matrix, and store the digit labels.
 ```{r}
 # Read the full data matrix
-read_mat <- as.matrix(read.table("digit.txt", sep=","))
+read_mat <- as.matrix(read.table("../data/digit.txt", sep=","))
 
 # Separate pixel values and the digit labels
 image_mat <- read_mat[, 2:785] # 784 pixel values
@@ -88,7 +91,7 @@ Interpretation: The first few components explain a large proportion of the total
 
 ```{r}
 # Load and prepare data
-read_mat <- as.matrix(read.table("digit.txt", sep=","))
+read_mat <- as.matrix(read.table("../data/digit.txt", sep=","))
 
 image_mat <- read_mat[, 2:785]
 label <- read_mat[, 1]
@@ -97,6 +100,17 @@ true_label <- as.numeric(factor(label))
 # PCA (first 20 components)
 pca_out <- prcomp(image_mat)
 pca20 <- pca_out$x[, 1:20]
+```
+
+Cluster numbers are arbitrary: cluster 1 is not necessarily digit 5. Before counting errors, each cluster is relabelled with the digit that gives the fewest misclassifications (trying all 3! = 6 possible matchings).
+```{r}
+# Relabel clusters so they line up with true_label (1 = digit 5, 2 = 6, 3 = 7)
+perms <- list(c(1,2,3), c(1,3,2), c(2,1,3), c(2,3,1), c(3,1,2), c(3,2,1))
+
+match_clusters <- function(cl) {
+  errors <- sapply(perms, function(p) sum(p[cl] != true_label))
+  perms[[which.min(errors)]][cl]
+}
 ```
 
 ## K-means and Hierarchical Clustering
@@ -113,8 +127,11 @@ km_cluster <- km_out$cluster
 k_tab <- table(True_Digit = label, KMeans_Cluster = km_cluster)
 knitr::kable(k_tab, caption = "Confusion Matrix: K-means Clustering")
 
+# Misclassifications after matching clusters to digits
+mis_kmeans <- sum(match_clusters(km_cluster) != true_label)
+mis_kmeans
 ```
-The confusion table shows how well the three K-means clusters align with the actual digits. Most observations for each digit are grouped into a consistent cluster, although there is noticeable mixing between digits 5 and 6. This is expected because K-means forces spherical clusters and can struggle when class boundaries overlap. The misclassification count summarises this mismatch and gives a quantitative measure of performance.
+The confusion table shows how well the three K-means clusters align with the actual digits. Most observations for each digit are grouped into a consistent cluster, although there is noticeable mixing between digits 5 and 6. This is expected because K-means forces spherical clusters and can struggle when class boundaries overlap. After matching each cluster to its digit, K-means misclassifies `r mis_kmeans` of the 3000 images (`r round(100*mis_kmeans/3000, 1)`% error).
 
 ### Hierarchical Clustering
 To compare clustering behaviour, we apply four hierarchical clustering methods: single, complete, average, and Ward.D2 linkage. Each method defines cluster similarity differently, so their performance may vary. We compute a Euclidean distance matrix from the PCA-reduced data and run hierarchical clustering using each linkage rule. The resulting cluster trees are then cut into three groups to correspond to the three digit classes.
@@ -136,21 +153,23 @@ cut_ward     <- cutree(hc_ward,     k = 3)
 **Misclassification Tables**
 
 ```{r}
-# Calculate errors
-mis_single   <- sum(cut_single != true_label)
-mis_complete <- sum(cut_complete != true_label)
-mis_average  <- sum(cut_average != true_label)
-mis_ward     <- sum(cut_ward != true_label)
+# Calculate errors (after matching clusters to digits)
+mis_single   <- sum(match_clusters(cut_single) != true_label)
+mis_complete <- sum(match_clusters(cut_complete) != true_label)
+mis_average  <- sum(match_clusters(cut_average) != true_label)
+mis_ward     <- sum(match_clusters(cut_ward) != true_label)
 
 # Create a dataframe to compare the methods side-by-side
+mis_all <- c(mis_kmeans, mis_single, mis_complete, mis_average, mis_ward)
 comparison_df <- data.frame(
-  Method = c("Single Linkage", "Complete Linkage", "Average Linkage", "Ward.D2"),
-  Misclassification_Count = c(mis_single, mis_complete, mis_average, mis_ward),
-  Error_Rate = c(mis_single, mis_complete, mis_average, mis_ward) / 3000
+  Method = c("K-means", "Single Linkage", "Complete Linkage", "Average Linkage", "Ward.D2"),
+  Misclassification_Count = mis_all,
+  Error_Rate = mis_all / 3000,
+  Accuracy = 1 - mis_all / 3000
 )
 
-knitr::kable(comparison_df, 
-             caption = "Comparison of Hierarchical Clustering Performance",
+knitr::kable(comparison_df,
+             caption = "Comparison of Clustering Performance",
              digits = 3)
 ```
 **Single Linkage Result:**
@@ -168,8 +187,8 @@ Ward’s method clearly performs best. It works by minimising total within-clust
 
 ## Best Method: Ward.D2 (Plots)
 
-### Dendogram
-Since Ward.D2 achieved the lowest misclassification count in Task 2(i), we examine its clustering structure in more detail. A dendrogram visually represents how observations are merged into clusters based on similarity. By highlighting the 3-cluster division, we can see how clearly Ward’s method separates the PCA-reduced data and how tightly the clusters form.
+### Dendrogram
+Since Ward.D2 achieved the lowest misclassification count, we examine its clustering structure in more detail. A dendrogram visually represents how observations are merged into clusters based on similarity. By highlighting the 3-cluster division, we can see how clearly Ward’s method separates the PCA-reduced data and how tightly the clusters form.
 ```{r}
 # Dendrogram
 plot(hc_ward, labels = FALSE, hang = -1, cex = 0.3, sub = "", xlab = "",
@@ -186,7 +205,8 @@ gray_cols <- c("#D9D9D9",
                "#8C8C8C",  
                "#3D3D3D")  
 
-cluster_col <- gray_cols[cut_ward]
+ward_matched <- match_clusters(cut_ward)
+cluster_col <- gray_cols[ward_matched]
 
 plot(pca20[,1], pca20[,2],
      col = cluster_col,
@@ -195,7 +215,7 @@ plot(pca20[,1], pca20[,2],
      main = "Ward.D2 Clusters with Misclassified Points Highlighted")
 
 # Misclassified indices
-mis_idx <- which(cut_ward != true_label)
+mis_idx <- which(ward_matched != true_label)
 
 # Add red X markers
 points(pca20[mis_idx,1],
@@ -259,7 +279,7 @@ So PCA can return to the original data when all components are used.
 
 ```{r}
 # Reload data
-read_mat <- as.matrix(read.table("digit.txt", sep=","))
+read_mat <- as.matrix(read.table("../data/digit.txt", sep=","))
 
 image_mat <- read_mat[, 2:785]
 label <- read_mat[, 1] 
@@ -356,7 +376,7 @@ This analysis demonstrated that Principal Component Analysis (PCA) successfully 
 
 **PCA:** The scree plot and visualizations confirmed that the first 20 components capture the majority of the variance, effectively filtering out noise.
 
-**Clustering:** Among the methods tested, Ward's hierarchical clustering achieved the best performance with the lowest misclassification rate, outperforming K-means and other linkage methods.
+**Clustering:** Among the methods tested, Ward's hierarchical clustering achieved the best performance, assigning `r round(100*(1 - mis_ward/3000), 1)`% of digits to the correct group without using any labels. This beats K-means (`r round(100*(1 - mis_kmeans/3000), 1)`%) and the other linkage methods.
 
 **Reconstruction:** The inverse transformation showed that while 1-2 PCs capture the general blur, using 10 PCs is sufficient to clearly reconstruct distinct digit shapes.
 

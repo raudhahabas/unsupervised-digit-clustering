@@ -1,0 +1,10 @@
+.Rhistory
+.RData
+.Rproj.user/
+.DS_Store
+.ipynb_checkpoints/
+.venv/
+__pycache__/
+report/*_files/
+report/*.log
+report/*.tex
